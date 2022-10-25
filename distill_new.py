@@ -147,7 +147,7 @@ def main(args):
 
     # modi: expert分段
     if args.interval:
-        intervals = [(i, i+args.interval-1) for i in range(0, args.expert_epochs, args.interval-args.overlap)]
+        intervals = [(i, i+args.interval-1) if i+args.interval<=args.expert_epochs else (i, args.expert_epochs) for i in range(0, args.expert_epochs, args.interval-args.overlap)]
         print(f'Interval: {args.interval}')
         print(f'Intervals: {intervals}')
     else:
