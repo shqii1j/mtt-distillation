@@ -147,13 +147,13 @@ def main(args):
 
     # modi: expert分段
     if args.interval:
-        intervals = [(i, i+args.interval-1) if i+args.interval<=args.expert_epochs else (i, args.expert_epochs) for i in range(0, args.expert_epochs, args.interval-args.overlap)]
+        intervals = [(i, i+args.interval-1) if i+args.interval<=args.max_end_epoch else (i, args.max_end_epoch) for i in range(0, args.max_end_epoch, args.interval-args.overlap)]
         print(f'Interval: {args.interval}')
         print(f'Intervals: {intervals}')
     else:
-        interval = math.ceil((args.expert_epochs+1+args.overlap*(args.segments-1))/args.segments)
+        interval = math.ceil((args.max_end_epoch+1+args.overlap*(args.segments-1))/args.segments)
         print(f'Interval: {interval}')
-        intervals = [(i, i+interval-1) if i+interval<=args.expert_epochs else (i, args.expert_epochs) for i in range(0, args.expert_epochs-args.overlap+1, interval-args.overlap)]
+        intervals = [(i, i+interval-1) if i+interval<=args.max_end_epoch else (i, args.max_end_epoch) for i in range(0, args.max_end_epoch-args.overlap+1, interval-args.overlap)]
         print(f'Intervals: {intervals}')
 
     # modi: 建立分段循环
@@ -222,12 +222,21 @@ def main(args):
 
                     accs_test = []
                     accs_train = []
+                    # print(model_eval,it,image_syn[0][0][0],label_syn[0],channel, num_classes, im_size)
+                    # print('\n')
+                    # print(syn_lr.item(),args.batch_train,args.dsa_param,args.dc_aug_param)
+                    # print('\n')
                     for it_eval in range(args.num_eval):
                         net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device) # get a random model
-
                         eval_labs = label_syn
                         with torch.no_grad():
                             image_save = image_syn
+                            torch.save(image_save.cpu(), 'tmp_img.pt')
+                            image_save_load = torch.load('tmp_img.pt')
+                            if (image_save_load==image_syn.cpu()).all():
+                                print(f'Same. Iteration:{it}, model_eval:{model_eval}, it_eval:{it_eval}')
+                            else:
+                                print(f'Fault! Iteration:{it}, model_eval:{model_eval}, it_eval:{it_eval}')
                         image_syn_eval, label_syn_eval = copy.deepcopy(image_save.detach()), copy.deepcopy(eval_labs.detach()) # avoid any unaware modification
 
                         args.lr_net = syn_lr.item()
@@ -247,7 +256,7 @@ def main(args):
                     wandb.log({seg_path+'/Max_Accuracy/{}'.format(model_eval): best_acc[model_eval]}, commit=commit)    # modi
                     wandb.log({seg_path+'/Std/{}'.format(model_eval): acc_test_std}, commit=commit)     # modi
                     wandb.log({seg_path+'/Max_Std/{}'.format(model_eval): best_std[model_eval]}, commit=commit)     # modi
-
+                    wandb.log({seg_path + '/Best_Syn_Lr/{}'.format(model_eval): args.lr_net}, commit=commit)
 
             if it in eval_it_pool and (save_this_it or it % 1000 == 0):
                 with torch.no_grad():
@@ -264,6 +273,7 @@ def main(args):
                     if save_this_it:
                         torch.save(image_save.cpu(), os.path.join(save_dir, "images_best.pt"))
                         torch.save(label_syn.cpu(), os.path.join(save_dir, "labels_best.pt"))
+                        best_syn_lr = args.lr_net
 
                     wandb.log({seg_path+"/Pixels": wandb.Histogram(torch.nan_to_num(image_syn.detach().cpu()))}, commit=commit)     # modi
 
@@ -287,13 +297,13 @@ def main(args):
                             wandb.log({seg_path+"/Clipped_Synthetic_Images/std_{}".format(clip_val): wandb.Image(torch.nan_to_num(grid.detach().cpu()))}, commit=commit)    # modi
 
                         if args.zca:
-                            image_save = image_save.to(args.device)
-                            image_save = args.zca_trans.inverse_transform(image_save)
-                            image_save.cpu()
+                            image_save_zca = image_save.to(args.device)
+                            image_save_zca = args.zca_trans.inverse_transform(image_save_zca)
+                            image_save_zca.cpu()
 
-                            torch.save(image_save.cpu(), os.path.join(save_dir, "images_zca_{}.pt".format(it)))
+                            torch.save(image_save_zca.cpu(), os.path.join(save_dir, "images_zca_{}.pt".format(it)))
 
-                            upsampled = image_save
+                            upsampled = image_save_zca
                             if args.dataset != "ImageNet":
                                 upsampled = torch.repeat_interleave(upsampled, repeats=4, dim=2)
                                 upsampled = torch.repeat_interleave(upsampled, repeats=4, dim=3)
@@ -302,15 +312,16 @@ def main(args):
                             wandb.log({seg_path+'/Reconstructed_Pixels': wandb.Histogram(torch.nan_to_num(image_save.detach().cpu()))}, commit=commit)      # modi
 
                             for clip_val in [2.5]:
-                                std = torch.std(image_save)
-                                mean = torch.mean(image_save)
-                                upsampled = torch.clip(image_save, min=mean - clip_val * std, max=mean + clip_val * std)
+                                std = torch.std(image_save_zca)
+                                mean = torch.mean(image_save_zca)
+                                upsampled = torch.clip(image_save_zca, min=mean - clip_val * std, max=mean + clip_val * std)
                                 if args.dataset != "ImageNet":
                                     upsampled = torch.repeat_interleave(upsampled, repeats=4, dim=2)
                                     upsampled = torch.repeat_interleave(upsampled, repeats=4, dim=3)
                                 grid = torchvision.utils.make_grid(upsampled, nrow=10, normalize=True, scale_each=True)
                                 wandb.log({seg_path+"/Clipped_Reconstructed_Images/std_{}".format(clip_val): wandb.Image(
                                     torch.nan_to_num(grid.detach().cpu()))}, commit=commit)     # modi
+
 
             wandb.log({seg_path+"/Synthetic_LR": syn_lr.detach().cpu()}, commit=commit)     # modi
 
@@ -344,15 +355,11 @@ def main(args):
                         buffer = buffer[:args.max_experts]
                     random.shuffle(buffer)
 
-            # modi: 分段初始化。第一段用expert的部分初始化；第二段用第一段的最新参数初始化
-            if k == 0:
-                rn_start_epoch = np.random.randint(start_epoch, min(start_epoch + args.max_start_epoch, end_epoch - 1))
-                starting_params = expert_trajectory[rn_start_epoch]
-            else:
-                rn_start_epoch = np.random.randint(args.overlap)
-                starting_params = last_params[rn_start_epoch]
+            # modi: 分段初始化。
+            rn_start_epoch = np.random.randint(start_epoch, end_epoch - args.expert_epochs)
+            starting_params = expert_trajectory[rn_start_epoch]
 
-            target_params = expert_trajectory[end_epoch]       # modi
+            target_params = expert_trajectory[rn_start_epoch+args.expert_epochs]       # modi
             target_params = torch.cat([p.data.to(args.device).reshape(-1) for p in target_params], 0)
 
             student_params = [torch.cat([p.data.to(args.device).reshape(-1) for p in starting_params], 0).requires_grad_(True)]
@@ -426,11 +433,6 @@ def main(args):
             wandb.log({"Grand_Loss": grand_loss.detach().cpu(),
                        "Random_Start_Epoch": rn_start_epoch})
 
-            # modi: 记录最后一次迭代的参数
-            if it == args.Iteration:
-                with torch.no_grad():
-                    last_params = student_params[-args.overlap:]
-
 
             for _ in student_params:
                 del _
@@ -487,9 +489,9 @@ if __name__ == '__main__':
     parser.add_argument('--buffer_path', type=str, default='./buffers', help='buffer path')
 
     # modi: expert_epochs的含义变为总轨迹的训练长度
-    parser.add_argument('--expert_epochs', type=int, default=3, help='max expert epochs number the target params are')
+    parser.add_argument('--expert_epochs', type=int, default=3, help='how many expert epochs the target params are')
     parser.add_argument('--syn_steps', type=int, default=20, help='how many steps to take on synthetic data')
-    parser.add_argument('--max_start_epoch', type=int, default=25, help='max epoch we can start at')
+    parser.add_argument('--max_end_epoch', type=int, default=25, help='the final expert epoch we should learn')
 
     # modi: 分段参数
     parser.add_argument('--overlap', type=int, default=1, help='the overlap num of params between segment student params')

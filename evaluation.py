@@ -6,11 +6,28 @@ from utils import get_dataset, get_network, get_eval_pool, evaluate_synset, get_
 import copy
 
 def main(args):
+    if args.zca and args.texture:
+        raise AssertionError("Cannot use zca and texture together")
+
+    if args.texture and args.pix_init == "real":
+        print("WARNING: Using texture with real initialization will take a very long time to smooth out the boundaries between images.")
+
+
+    print("CUDNN STATUS: {}".format(torch.backends.cudnn.enabled))
+
     args.dsa = True if args.dsa == 'True' else False
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader, loader_train_dict, class_map, class_map_inv = get_dataset(
-        args.dataset, args.data_path, args.batch_real, args.subset, args=args)
+    channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader, loader_train_dict, class_map, class_map_inv = get_dataset(args.dataset, args.data_path, args.batch_real, args.subset, args=args)
+    model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
+
+
+    args.im_size = im_size
+
+    accs_all_exps = dict() # record performances of all experiments
+    for key in model_eval_pool:
+        accs_all_exps[key] = []
+
 
     if args.dsa:
         # args.epoch_eval_train = 1000
@@ -23,8 +40,16 @@ def main(args):
         zca_trans = args.zca_trans
     else:
         zca_trans = None
+
     args.dsa_param = dsa_params
     args.zca_trans = zca_trans
+
+    if args.batch_syn is None:
+        args.batch_syn = num_classes * args.ipc
+
+    args.distributed = torch.cuda.device_count() > 1
+
+
 
     # modi:
     image_path = os.path.join(args.syn_image_path, args.dataset, args.run_name)
@@ -34,17 +59,19 @@ def main(args):
     lab_l = []
     for f in image_folder:
         print(f)
-        max_epoch = max([eval(_.split('.')[0].split('_')[1]) for _ in os.listdir(image_path+'/'+f) if 'labels' in _ and 'best' not in _])
-        img = torch.load(os.path.join(image_path,f,'images_{}.pt'.format(max_epoch)))
-        lab = torch.load(os.path.join(image_path,f,'labels_{}.pt'.format(max_epoch)))
-        print(max_epoch)
+        img = torch.load(os.path.join(image_path,f,'images_best.pt'))
+        lab = torch.load(os.path.join(image_path,f,'labels_best.pt'))
         img_l.append(img)
         lab_l.append(lab)
-        break
-    image_syn = torch.cat(img_l, dim=0)
+    image_syn = torch.cat(img_l, dim=0).to(args.device).requires_grad_(True)
     label_syn = torch.cat(lab_l, dim=0)
 
+
     model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
+
+    if args.dsa and (not args.no_aug):
+        DiffAugment(image_syn, args.dsa_strategy, param=args.dsa_param)
+
     for model_eval in model_eval_pool:
         if args.dsa:
             print('DSA augmentation strategy: \n', args.dsa_strategy)
@@ -54,9 +81,10 @@ def main(args):
 
         accs_test = []
         accs_train = []
+
         for it_eval in range(args.num_eval):
             net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device)  # get a random model
-            args.lr_net = 0.033
+            args.lr_net = torch.tensor(args.lr_net).to(args.device).requires_grad_(True).item()
             eval_labs = label_syn
             with torch.no_grad():
                 image_save = image_syn
@@ -84,6 +112,7 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, default='ConvNet', help='model')
 
     parser.add_argument('--ipc', type=int, default=1, help='image(s) per class')
+    parser.add_argument('--lr_net', type=float, default=0.01, help='the learning rate in the eval model')
 
     parser.add_argument('--eval_mode', type=str, default='S',
                         help='eval_mode, check utils.py for more info')
@@ -109,7 +138,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--expert_epochs', type=int, default=3, help='max expert epochs number the target params are')
     parser.add_argument('--syn_steps', type=int, default=20, help='how many steps to take on synthetic data')
-    parser.add_argument('--max_start_epoch', type=int, default=25, help='max epoch we can start at')
+    parser.add_argument('--max_end_epoch', type=int, default=25, help='max epoch we can start at')
 
     parser.add_argument('--epoch_eval_train', type=int, default=1000, help='epochs to train a model with synthetic data')
 
