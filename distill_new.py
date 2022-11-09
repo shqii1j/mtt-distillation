@@ -147,7 +147,7 @@ def main(args):
 
     # modi: expert分段
     if args.interval:
-        intervals = [(i, i+args.interval-1) if i+args.interval<=args.max_end_epoch else (i, args.max_end_epoch) for i in range(0, args.max_end_epoch, args.interval-args.overlap)]
+        intervals = [(i, i+args.interval-1) if i+args.interval<=args.max_end_epoch else (i, args.max_end_epoch) for i in range(0, args.max_end_epoch-args.overlap+1, args.interval-args.overlap)]
         print(f'Interval: {args.interval}')
         print(f'Intervals: {intervals}')
     else:
