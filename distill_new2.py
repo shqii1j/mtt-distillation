@@ -72,9 +72,6 @@ def main(args):
     args.dsa_param = dsa_params
     args.zca_trans = zca_trans
 
-    # if args.batch_syn is None:
-    #     args.batch_syn = num_classes * args.ipc
-
     args.distributed = torch.cuda.device_count() > 1
 
 
@@ -167,40 +164,43 @@ def main(args):
     for k, inter in enumerate(intervals):
         start_epoch = inter[0]          # modi
         end_epoch = inter[1]            # modi
-        ipc = ipcs[k]                   # modi
-        if args.batch_syn == None:                 # modi
+        ipc = ipcs[k]  # modi
+        if args.batch_syn == None:  # modi
             batch_syn = num_classes * ipc
-        else:                                      # modi
+        else:  # modi
             batch_syn = args.batch_syn
         print(f'\n\n\nTraining epoch from {start_epoch} to {end_epoch}, with {ipc} ipc')
 
         ''' initialize the synthetic data '''
         label_syn = torch.tensor([np.ones(ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
 
-        if args.texture:
-            image_syn = torch.randn(size=(num_classes * ipc, channel, im_size[0]*args.canvas_size, im_size[1]*args.canvas_size), dtype=torch.float)
-        else:
-            image_syn = torch.randn(size=(num_classes * ipc, channel, im_size[0], im_size[1]), dtype=torch.float)
-
-        syn_lr = torch.tensor(args.lr_teacher).to(args.device)
-
-        if args.pix_init == 'real':
-            print('initialize synthetic data from random real images')
+        if k == 0:
             if args.texture:
-                for c in range(num_classes):
-                    for i in range(args.canvas_size):
-                        for j in range(args.canvas_size):
-                            image_syn.data[c * ipc:(c + 1) * ipc, :, i * im_size[0]:(i + 1) * im_size[0],
-                            j * im_size[1]:(j + 1) * im_size[1]] = torch.cat(
-                                [get_images(c, 1).detach().data for s in range(ipc)])
-            for c in range(num_classes):
-                image_syn.data[c * ipc:(c + 1) * ipc] = get_images(c, ipc).detach().data
-        else:
-            print('initialize synthetic data from random noise')
+                image_syn = torch.randn(size=(num_classes * ipc, channel, im_size[0]*args.canvas_size, im_size[1]*args.canvas_size), dtype=torch.float)
+            else:
+                image_syn = torch.randn(size=(num_classes * ipc, channel, im_size[0], im_size[1]), dtype=torch.float)
 
+            syn_lr = torch.tensor(args.lr_teacher).to(args.device)
+
+            if args.pix_init == 'real':
+                print('initialize synthetic data from random real images')
+                if args.texture:
+                    for c in range(num_classes):
+                        for i in range(args.canvas_size):
+                            for j in range(args.canvas_size):
+                                image_syn.data[c * ipc:(c + 1) * ipc, :, i * im_size[0]:(i + 1) * im_size[0],
+                                j * im_size[1]:(j + 1) * im_size[1]] = torch.cat(
+                                    [get_images(c, 1).detach().data for s in range(ipc)])
+                for c in range(num_classes):
+                    image_syn.data[c * ipc:(c + 1) * ipc] = get_images(c, ipc).detach().data
+            else:
+                print('initialize synthetic data from random noise')
+            image_syn = image_syn.detach().to(args.device).requires_grad_(True)
+        else:
+            image_syn = (image_syn + args.alpha_noise * torch.randn_like(image_syn)).detach().to(args.device).requires_grad_(True)  # modi: 加入高斯噪声
 
         ''' training '''
-        image_syn = image_syn.detach().to(args.device).requires_grad_(True)
+        # image_syn = image_syn.detach().to(args.device).requires_grad_(True)
         syn_lr = syn_lr.detach().to(args.device).requires_grad_(True)
         optimizer_img = torch.optim.SGD([image_syn], lr=args.lr_img, momentum=0.5)
         optimizer_lr = torch.optim.SGD([syn_lr], lr=args.lr_lr, momentum=0.5)
@@ -522,6 +522,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_experts', type=int, default=None, help='number of experts to read per file (leave as None unless doing ablations)')
 
     parser.add_argument('--force_save', action='store_true', help='this will save images for 50ipc')
+
+    parser.add_argument('--alpha_noise', type=float, default=1.0, help='control the noise (alpha)')
 
     args = parser.parse_args()
 
