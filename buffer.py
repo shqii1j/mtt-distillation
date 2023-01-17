@@ -157,6 +157,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_interval', type=int, default=10)
 
     parser.add_argument('--reparam_syn', action='store_true')
+    parser.add_argument('syn_image_path', type='str', default=None, help="syn_image_path")
     parser.add_argument('--run_name', type='str', default=None, help="run_name")
     parser.add_argument('--file_name', type='str', default=None, help="file_name(epoch)")
     parser.add_argument('--no_aug', type=bool, default=False, help='this turns off diff aug during distillation')
