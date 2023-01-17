@@ -71,7 +71,7 @@ def main(args):
         image_path = os.path.join(args.syn_image_path, args.dataset, args.run_name, args.file_name)
         save_dir = os.path.join(image_path, 'buffer')
         image_syn = torch.load(os.path.join(image_path, 'images_best.pt'))
-        label_syn = torch.load(os.path.join(image_path, 'images_best.pt'))
+        label_syn = torch.load(os.path.join(image_path, 'labels_best.pt'))
 
         if args.dsa and (not args.no_aug):
             DiffAugment(image_syn, args.dsa_strategy, param=args.dsa_param)
@@ -149,6 +149,7 @@ if __name__ == '__main__':
                         help='differentiable Siamese augmentation strategy')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
     parser.add_argument('--buffer_path', type=str, default='./buffers', help='buffer path')
+    parser.add_argument('--epoch_eval_train', type=int, default=1000, help='epochs to train a model with synthetic data')
     parser.add_argument('--train_epochs', type=int, default=50)
     parser.add_argument('--zca', action='store_true')
     parser.add_argument('--decay', action='store_true')
@@ -157,9 +158,9 @@ if __name__ == '__main__':
     parser.add_argument('--save_interval', type=int, default=10)
 
     parser.add_argument('--reparam_syn', action='store_true')
-    parser.add_argument('syn_image_path', type='str', default=None, help="syn_image_path")
-    parser.add_argument('--run_name', type='str', default=None, help="run_name")
-    parser.add_argument('--file_name', type='str', default=None, help="file_name(epoch)")
+    parser.add_argument('--syn_image_path', type=str, default="logged_files", help="syn_image_path")
+    parser.add_argument('--run_name', type=str, default=None, help="run_name")
+    parser.add_argument('--file_name', type=str, default=None, help="file_name(epoch)")
     parser.add_argument('--no_aug', type=bool, default=False, help='this turns off diff aug during distillation')
     parser.add_argument('--lr_net', type=float, default=0.01, help='the learning rate in the eval model')
     parser.add_argument('--texture', action='store_true', help="will distill textures instead")

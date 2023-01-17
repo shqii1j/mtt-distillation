@@ -1,1 +1,4 @@
 .idea
+./dataset/
+./wandb/
+./logged_files/
