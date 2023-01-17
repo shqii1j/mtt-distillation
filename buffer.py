@@ -3,9 +3,11 @@ import argparse
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-from utils import get_dataset, get_network, get_daparam,\
-    TensorDataset, epoch, ParamDiffAug
+from utils import get_dataset, get_network, get_daparam, get_eval_pool,\
+    TensorDataset, epoch, ParamDiffAug, DiffAugment, evaluate_synset
 import copy
+from random import choice
+from reparam_module import ReparamModule
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -16,7 +18,6 @@ def main(args):
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     args.dsa_param = ParamDiffAug()
 
-    channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader, loader_train_dict, class_map, class_map_inv = get_dataset(args.dataset, args.data_path, args.batch_real, args.subset, args=args)
 
     # print('\n================== Exp %d ==================\n '%exp)
     print('Hyper-parameters: \n', args.__dict__)
@@ -32,6 +33,8 @@ def main(args):
 
 
     ''' organize the real dataset '''
+    channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader, loader_train_dict, class_map, class_map_inv = get_dataset(args.dataset, args.data_path, args.batch_real, args.subset, args=args)
+
     images_all = []
     labels_all = []
     indices_class = [[] for c in range(num_classes)]
@@ -64,11 +67,35 @@ def main(args):
     args.dc_aug_param['strategy'] = 'crop_scale_rotate'  # for whole-dataset training
     print('DC augmentation parameters: \n', args.dc_aug_param)
 
+    if args.reparam_syn:
+        image_path = os.path.join(args.syn_image_path, args.dataset, args.run_name, args.file_name)
+        save_dir = os.path.join(image_path, 'buffer')
+        image_syn = torch.load(os.path.join(image_path, 'images_best.pt'))
+        label_syn = torch.load(os.path.join(image_path, 'images_best.pt'))
+
+        if args.dsa and (not args.no_aug):
+            DiffAugment(image_syn, args.dsa_strategy, param=args.dsa_param)
+
+
     for it in range(0, args.num_experts):
 
         ''' Train synthetic data '''
         teacher_net = get_network(args.model, channel, num_classes, im_size).to(args.device) # get a random model
         teacher_net.train()
+        if args.reparam_syn:
+            net_eval = get_network(args.model, channel, num_classes, im_size).to(
+                args.device)  # get a random model
+            args.lr_net = torch.tensor(args.lr_net).to(args.device).requires_grad_(True).item()
+            eval_labs = label_syn
+            with torch.no_grad():
+                image_save = image_syn
+            image_syn_eval, label_syn_eval = copy.deepcopy(image_save.detach()), copy.deepcopy(eval_labs.detach())  # avoid any unaware modification
+
+            net_eval, acc_train, acc_test = evaluate_synset(it, net_eval, image_syn_eval, label_syn_eval,
+                                                            testloader, args,
+                                                            texture=args.texture)
+            teacher_net.load_state_dict(net_eval.state_dict())
+
         lr = args.lr_teacher
         teacher_optim = torch.optim.SGD(teacher_net.parameters(), lr=lr, momentum=args.mom, weight_decay=args.l2)  # optimizer_img for synthetic data
         teacher_optim.zero_grad()
@@ -128,6 +155,11 @@ if __name__ == '__main__':
     parser.add_argument('--mom', type=float, default=0, help='momentum')
     parser.add_argument('--l2', type=float, default=0, help='l2 regularization')
     parser.add_argument('--save_interval', type=int, default=10)
+
+    parser.add_argument('--reparam_syn', action='store_true')
+    parser.add_argument('--no_aug', type=bool, default=False, help='this turns off diff aug during distillation')
+    parser.add_argument('--lr_net', type=float, default=0.01, help='the learning rate in the eval model')
+    parser.add_argument('--texture', action='store_true', help="will distill textures instead")
 
     args = parser.parse_args()
     main(args)
