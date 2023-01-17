@@ -157,6 +157,8 @@ if __name__ == '__main__':
     parser.add_argument('--save_interval', type=int, default=10)
 
     parser.add_argument('--reparam_syn', action='store_true')
+    parser.add_argument('--run_name', type='str', default=None, help="run_name")
+    parser.add_argument('--file_name', type='str', default=None, help="file_name(epoch)")
     parser.add_argument('--no_aug', type=bool, default=False, help='this turns off diff aug during distillation')
     parser.add_argument('--lr_net', type=float, default=0.01, help='the learning rate in the eval model')
     parser.add_argument('--texture', action='store_true', help="will distill textures instead")
