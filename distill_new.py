@@ -109,12 +109,16 @@ def main(args):
 
     #modi: 提前初始化expert file代码位置
     ''' initialize expert file'''
-    expert_dir = os.path.join(args.buffer_path, args.dataset)
-    if args.dataset == "ImageNet":
-        expert_dir = os.path.join(expert_dir, args.subset, str(args.res))
-    if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
-        expert_dir += "_NO_ZCA"
-    expert_dir = os.path.join(expert_dir, args.model)
+    if args.reparam_syn:
+        expert_dir = os.path.join(".", "logged_files", args.dataset, args.run_name, args.file_name, 'buffer')
+    else:
+        expert_dir = os.path.join(args.buffer_path, args.dataset)
+        if args.dataset == "ImageNet":
+            expert_dir = os.path.join(expert_dir, args.subset, str(args.res))
+        if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
+            expert_dir += "_NO_ZCA"
+        expert_dir = os.path.join(expert_dir, args.model)
+        args.run_name = wandb.run.name
     print("Expert Dir: {}".format(expert_dir))
 
     if args.load_all:
@@ -215,6 +219,9 @@ def main(args):
         best_std = {m: 0 for m in model_eval_pool}
 
         seg_path = "{}-{}".format(start_epoch, end_epoch) # modi
+        if args.file_name:
+            seg_path = seg_path + '+' + wandb.run.name
+
         for it in range(0, args.Iteration+1):
             save_this_it = False
             commit = False              # modi: wanbd.commit提交每段评估结果
@@ -268,7 +275,7 @@ def main(args):
                 with torch.no_grad():
                     image_save = image_syn.cuda()
 
-                    save_dir = os.path.join(".", "logged_files", args.dataset, wandb.run.name, seg_path)        # modi
+                    save_dir = os.path.join(".", "logged_files", args.dataset, args.run_name, seg_path)        # modi
 
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
@@ -522,6 +529,10 @@ if __name__ == '__main__':
     parser.add_argument('--max_experts', type=int, default=None, help='number of experts to read per file (leave as None unless doing ablations)')
 
     parser.add_argument('--force_save', action='store_true', help='this will save images for 50ipc')
+
+    parser.add_argument('--reparam_syn', action='store_true')
+    parser.add_argument('--run_name', type=str, default=None, help="run_name")
+    parser.add_argument('--file_name', type=str, default=None, help="file_name(epoch)")
 
     args = parser.parse_args()
 
