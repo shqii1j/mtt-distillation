@@ -109,17 +109,17 @@ def main(args):
 
     #modi: 提前初始化expert file代码位置
     ''' initialize expert file'''
-    if args.reparam_syn:
-        expert_dir = os.path.join(".", "logged_files", args.dataset, args.run_name, args.file_name, 'buffer')
-    else:
-        expert_dir = os.path.join(args.buffer_path, args.dataset)
-        if args.dataset == "ImageNet":
-            expert_dir = os.path.join(expert_dir, args.subset, str(args.res))
-        if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
-            expert_dir += "_NO_ZCA"
-        expert_dir = os.path.join(expert_dir, args.model)
-        args.run_name = wandb.run.name
+    expert_dir = args.buffer_path
+    if args.dataset == "ImageNet":
+        expert_dir = os.path.join(expert_dir, args.subset, str(args.res))
+    if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
+        expert_dir += "_NO_ZCA"
+    expert_dir = os.path.join(expert_dir, args.model)
+
     print("Expert Dir: {}".format(expert_dir))
+
+    if not args.reparam_syn:
+        args.run_name = wandb.run.name
 
     if args.load_all:
         buffer = []
