@@ -1,5 +1,7 @@
 import os
 import argparse
+import pdb
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -172,7 +174,8 @@ def main(args):
     # modi: image_best
     if args.reparam_syn:
         image_best = torch.load(os.path.join(".", "logged_files", args.dataset, args.run_name, args.file_name, 'images_best.pt')).to(args.device).requires_grad_(False)
-        label_best = torch.load(os.path.join(".", "logged_files", args.dataset, args.run_name, args.file_name, 'labels_best.pt'))
+        label_best = torch.load(os.path.join(".", "logged_files", args.dataset, args.run_name, args.file_name, 'labels_best.pt')).to(args.device)
+        print('load images_best ...')
 
     # modi: 建立分段循环
     for k, inter in enumerate(intervals):
@@ -260,6 +263,7 @@ def main(args):
                         if args.reparam_syn:
                             image_syn_eval = torch.concat([image_best, copy.deepcopy(image_save.detach())], dim=0)
                             label_syn_eval = torch.concat([label_best, copy.deepcopy(eval_labs.detach())], dim=0) # avoid any unaware modification
+
                         else:
                             image_syn_eval = copy.deepcopy(image_save.detach())
                             label_syn_eval = copy.deepcopy(eval_labs.detach())
