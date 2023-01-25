@@ -44,33 +44,66 @@ def main(args):
     args.dsa_param = dsa_params
     args.zca_trans = zca_trans
 
-    if args.batch_syn is None:
-        args.batch_syn = num_classes * args.ipc
-
     args.distributed = torch.cuda.device_count() > 1
 
 
 
     # modi:
     image_path = os.path.join(args.syn_image_path, args.dataset, args.run_name)
-    image_folder = os.listdir(image_path)
-    print(image_folder)
-    img_l = []
-    lab_l = []
-    for f in image_folder:
-        print(f)
-        img = torch.load(os.path.join(image_path,f,'images_best.pt'))
-        lab = torch.load(os.path.join(image_path,f,'labels_best.pt'))
-        img_l.append(img)
-        lab_l.append(lab)
-    image_syn = torch.cat(img_l, dim=0).to(args.device).requires_grad_(True)
-    label_syn = torch.cat(lab_l, dim=0)
+
+    if args.smooth:
+        if args.last:
+            max_epoch = max([int(f.split('.')[0].split('_')[1]) for f in os.listdir(image_path) if 'images_zca' in f])
+            image_name = 'images_' + str(max_epoch) + '.pt'
+            labels_name = 'labels_' + str(max_epoch) + '.pt'
+        else:
+            image_name = 'images_best.pt'
+            labels_name = 'labels_best.pt'
+        img = torch.load(os.path.join(image_path, image_name)).to(args.device).requires_grad_(True)
+        lab = torch.load(os.path.join(image_path, labels_name))
+
+        if args.dsa and (not args.no_aug):
+            DiffAugment(img, args.dsa_strategy, param=args.dsa_param)
+
+        img, lab = [img], [lab]
+
+    else:
+        image_folder = args.file_names.split(',')
+        print(image_folder)
+        img_l = []
+        lab_l = []
+        for f in image_folder:
+            print(f)
+            if args.last:
+                max_epoch = max(
+                    [int(f.split('.')[0].split('_')[2]) for f in os.listdir(os.path.join(image_path,f)) if 'images_zca' in f])
+                image_name = 'images_' + str(max_epoch) + '.pt'
+                labels_name = 'labels_' + str(max_epoch) + '.pt'
+            else:
+                image_name = 'images_best.pt'
+                labels_name = 'labels_best.pt'
+            img = torch.load(os.path.join(image_path,f,image_name)).to(args.device).requires_grad_(True)
+            lab = torch.load(os.path.join(image_path,f,labels_name))
+
+            if args.dsa and (not args.no_aug):
+                DiffAugment(img, args.dsa_strategy, param=args.dsa_param)
+
+            if img_l:
+                img_l.append(torch.cat([img_l[-1], img], dim=0))
+                lab_l.append(torch.cat([lab_l[-1], lab], dim=0))
+            else:
+                img_l.append(img.to(args.device).requires_grad_(True))
+                lab_l.append(lab)
+
+
+        # image_syn = torch.cat(img_l, dim=0).to(args.device).requires_grad_(True)
+        # label_syn = torch.cat(lab_l, dim=0)
+        print(image_name)
 
 
     model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
 
-    if args.dsa and (not args.no_aug):
-        DiffAugment(image_syn, args.dsa_strategy, param=args.dsa_param)
+
 
     for model_eval in model_eval_pool:
         if args.dsa:
@@ -85,21 +118,25 @@ def main(args):
         for it_eval in range(args.num_eval):
             net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device)  # get a random model
             args.lr_net = torch.tensor(args.lr_net).to(args.device).requires_grad_(True).item()
-            eval_labs = label_syn
-            with torch.no_grad():
-                image_save = image_syn
-            image_syn_eval, label_syn_eval = copy.deepcopy(image_save.detach()), copy.deepcopy(
-                eval_labs.detach())  # avoid any unaware modification
 
-            _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args,
+            for img, lab in zip(img_l, lab_l):
+                eval_labs = lab
+                with torch.no_grad():
+                    image_save = img
+                image_syn_eval, label_syn_eval = copy.deepcopy(image_save.detach()), copy.deepcopy(
+                    eval_labs.detach())  # avoid any unaware modification
+
+                net_eval, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args,
                                                      texture=args.texture)
             accs_test.append(acc_test)
             accs_train.append(acc_train)
+
         accs_test = np.array(accs_test)
         accs_train = np.array(accs_train)
         acc_test_mean = np.mean(accs_test)
         acc_test_std = np.std(accs_test)
         print(acc_test_mean)
+        print(acc_test_std)
 
 
 if __name__ == '__main__':
@@ -120,7 +157,6 @@ if __name__ == '__main__':
     parser.add_argument('--num_eval', type=int, default=5, help='how many networks to evaluate on')
 
     parser.add_argument('--batch_real', type=int, default=256, help='batch size for real data')
-    parser.add_argument('--batch_syn', type=int, default=None, help='should only use this if you run out of VRAM')
     parser.add_argument('--batch_train', type=int, default=256, help='batch size for training networks')
 
     parser.add_argument('--dsa', type=str, default='True', choices=['True', 'False'],
@@ -135,17 +171,13 @@ if __name__ == '__main__':
     # modi:
     parser.add_argument('--syn_image_path', type=str, default='logged_files', help='buffer path')
     parser.add_argument('--run_name', type=str, default='fearless-valley-7', help='buffer path')
-
-    parser.add_argument('--expert_epochs', type=int, default=3, help='max expert epochs number the target params are')
-    parser.add_argument('--syn_steps', type=int, default=20, help='how many steps to take on synthetic data')
-    parser.add_argument('--max_end_epoch', type=int, default=25, help='max epoch we can start at')
+    parser.add_argument('--file_names', type=str, default=None, help='file_names')
 
     parser.add_argument('--epoch_eval_train', type=int, default=1000, help='epochs to train a model with synthetic data')
 
-    # modi: 分段参数
-    parser.add_argument('--overlap', type=int, default=1, help='the overlap num of params between segment student params')
-    parser.add_argument('--segments', type=int, default=5, help='Number of student trajectory segments')
-    parser.add_argument('--interval', type=int, default=None, help='using fixed interval length to segment student trajectory')
+    # modi: img 分段参数
+    parser.add_argument('--smooth', action='store_true', help="do smooth")
+    parser.add_argument('--last', action='store_true', help="evaluate last")
 
     parser.add_argument('--zca', action='store_true', help="do ZCA whitening")
 
