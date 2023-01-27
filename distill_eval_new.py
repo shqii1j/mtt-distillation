@@ -263,13 +263,15 @@ def main(args):
                         if args.reparam_syn:
                             image_syn_eval = torch.concat([image_best, copy.deepcopy(image_save.detach())], dim=0)
                             label_syn_eval = torch.concat([label_best, copy.deepcopy(eval_labs.detach())], dim=0) # avoid any unaware modification
-
+                            args.lr_net = args.reparam_syn_lr
+                            net_eval, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_best, label_best,
+                                                                     testloader, args, texture=args.texture)
                         else:
                             image_syn_eval = copy.deepcopy(image_save.detach())
                             label_syn_eval = copy.deepcopy(eval_labs.detach())
 
                         args.lr_net = syn_lr.item()
-                        _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args, texture=args.texture)
+                        _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args, texture=args.texture, printer=True)
                         accs_test.append(acc_test)
                         accs_train.append(acc_train)
                     accs_test = np.array(accs_test)
@@ -286,6 +288,10 @@ def main(args):
                     wandb.log({seg_path+'/Std/{}'.format(model_eval): acc_test_std}, commit=commit)     # modi
                     wandb.log({seg_path+'/Max_Std/{}'.format(model_eval): best_std[model_eval]}, commit=commit)     # modi
                     wandb.log({seg_path + '/Best_Syn_Lr/{}'.format(model_eval): args.lr_net}, commit=commit)
+
+                    wandb.log({'Max_Accuracy/{}'.format(model_eval): best_acc[model_eval]}, commit=commit)  # modi
+                    wandb.log({'Max_Std/{}'.format(model_eval): best_std[model_eval]}, commit=commit)  # modi
+                    wandb.log({'Best_Syn_Lr/{}'.format(model_eval): args.lr_net}, commit=commit)
 
             if it in eval_it_pool and (save_this_it or it % 1000 == 0):
                 with torch.no_grad():
@@ -553,9 +559,9 @@ if __name__ == '__main__':
     parser.add_argument('--reparam_syn', action='store_true')
     parser.add_argument('--run_name', type=str, default=None, help="run_name")
     parser.add_argument('--file_name', type=str, default=None, help="file_name(epoch)")
+    parser.add_argument('--reparam_syn_lr', type=float, default=None, help="reparam_syn_lr")
 
     args = parser.parse_args()
 
     main(args)
-
 

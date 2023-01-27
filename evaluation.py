@@ -1,5 +1,7 @@
 import os
 import argparse
+import pdb
+
 import numpy as np
 import torch
 from utils import get_dataset, get_network, get_eval_pool, evaluate_synset, get_time, DiffAugment, ParamDiffAug
@@ -114,20 +116,23 @@ def main(args):
 
         accs_test = []
         accs_train = []
+        args.lr_nets = args.lr_nets.split(',')
 
         for it_eval in range(args.num_eval):
             net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device)  # get a random model
-            args.lr_net = torch.tensor(args.lr_net).to(args.device).requires_grad_(True).item()
 
-            for img, lab in zip(img_l, lab_l):
+
+            for img, lab, lr in zip(img_l, lab_l, args.lr_nets):
                 eval_labs = lab
                 with torch.no_grad():
                     image_save = img
                 image_syn_eval, label_syn_eval = copy.deepcopy(image_save.detach()), copy.deepcopy(
                     eval_labs.detach())  # avoid any unaware modification
+                args.lr_net = torch.tensor(eval(lr)).to(args.device).requires_grad_(True).item()
 
                 net_eval, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args,
-                                                     texture=args.texture)
+                                                     texture=args.texture, printer=True)
+
             accs_test.append(acc_test)
             accs_train.append(acc_train)
 
@@ -149,7 +154,7 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, default='ConvNet', help='model')
 
     parser.add_argument('--ipc', type=int, default=1, help='image(s) per class')
-    parser.add_argument('--lr_net', type=float, default=0.01, help='the learning rate in the eval model')
+    parser.add_argument('--lr_nets', type=str, default='0.01', help='the learning rate in the eval model')
 
     parser.add_argument('--eval_mode', type=str, default='S',
                         help='eval_mode, check utils.py for more info')
