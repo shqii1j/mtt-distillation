@@ -19,7 +19,6 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def main(args):
-
     if args.zca and args.texture:
         raise AssertionError("Cannot use zca and texture together")
 
@@ -173,8 +172,19 @@ def main(args):
 
     # modi: image_best
     if args.reparam_syn:
-        image_best = torch.load(os.path.join(".", "logged_files", args.dataset, args.run_name, args.file_name, 'images_best.pt')).to(args.device).requires_grad_(False)
-        label_best = torch.load(os.path.join(".", "logged_files", args.dataset, args.run_name, args.file_name, 'labels_best.pt')).to(args.device)
+        images_best = []
+        labels_best = []
+        args.lrs_net = [torch.tensor(eval(lr)).to(args.device).item() for lr in args.lrs_net.split(',')]
+        image_path = os.path.join(args.image_path, args.dataset, args.run_name)
+        for f in args.files_name.split(','):
+            if images_best:
+                img = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, 'images_best.pt')).to(args.device).requires_grad_(False)], dim=0)
+                lab = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, 'labels_best.pt')).to(args.device)], dim=0)
+            else:
+                img = torch.load(os.path.join(image_path, f, 'images_best.pt')).to(args.device).requires_grad_(False)
+                lab = torch.load(os.path.join(image_path, f, 'labels_best.pt')).to(args.device)
+            images_best.append(img)
+            labels_best.append(lab)
         print('load images_best ...')
 
     # modi: 建立分段循环
@@ -229,7 +239,7 @@ def main(args):
         best_std = {m: 0 for m in model_eval_pool}
 
         seg_path = "{}-{}".format(start_epoch, end_epoch) # modi
-        if args.file_name:
+        if args.files_name:
             seg_path = seg_path + '+' + wandb.run.name
 
         for it in range(0, args.Iteration+1):
@@ -257,19 +267,28 @@ def main(args):
                     # print('\n')
                     for it_eval in range(args.num_eval):
                         net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device) # get a random model
-                        eval_labs = label_syn
-                        with torch.no_grad():
-                            image_save = image_syn
                         if args.reparam_syn:
-                            image_syn_eval = torch.concat([image_best, copy.deepcopy(image_save.detach())], dim=0)
-                            label_syn_eval = torch.concat([label_best, copy.deepcopy(eval_labs.detach())], dim=0) # avoid any unaware modification
-                            args.lr_net = args.reparam_syn_lr
-                            net_eval, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_best, label_best,
-                                                                     testloader, args, texture=args.texture)
+                            for img, lab, lr in zip(images_best, labels_best, args.lrs_net):
+                                eval_labs = lab
+                                args.lr_net = lr
+                                with torch.no_grad():
+                                    image_save = img
+                                image_syn_eval, label_syn_eval = copy.deepcopy(image_save.detach()), copy.deepcopy(
+                                    eval_labs.detach())  # avoid any unaware modification
+                                net_eval, acc_train, acc_test = evaluate_synset(it, net_eval, image_syn_eval,
+                                                                                label_syn_eval,
+                                                                                testloader, args,
+                                                                                texture=args.texture, printer=True)
+                            eval_labs = torch.cat([labels_best[-1], label_syn], 0)
+                            with torch.no_grad():
+                                image_save = torch.cat([images_best[-1], image_syn], 0)
                         else:
-                            image_syn_eval = copy.deepcopy(image_save.detach())
-                            label_syn_eval = copy.deepcopy(eval_labs.detach())
+                            eval_labs = label_syn
+                            with torch.no_grad():
+                                image_save = image_syn
 
+                        image_syn_eval = copy.deepcopy(image_save.detach())
+                        label_syn_eval = copy.deepcopy(eval_labs.detach())
                         args.lr_net = syn_lr.item()
                         _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args, texture=args.texture, printer=True)
                         accs_test.append(acc_test)
@@ -283,21 +302,14 @@ def main(args):
                         best_std[model_eval] = acc_test_std
                         save_this_it = True
                     print('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------'%(len(accs_test), model_eval, acc_test_mean, acc_test_std))
-                    wandb.log({seg_path+'/Accuracy/{}'.format(model_eval): acc_test_mean}, commit=commit)   # modi
-                    wandb.log({seg_path+'/Max_Accuracy/{}'.format(model_eval): best_acc[model_eval]}, commit=commit)    # modi
-                    wandb.log({seg_path+'/Std/{}'.format(model_eval): acc_test_std}, commit=commit)     # modi
-                    wandb.log({seg_path+'/Max_Std/{}'.format(model_eval): best_std[model_eval]}, commit=commit)     # modi
-                    wandb.log({seg_path + '/Best_Syn_Lr/{}'.format(model_eval): args.lr_net}, commit=commit)
-
                     wandb.log({'Max_Accuracy/{}'.format(model_eval): best_acc[model_eval]}, commit=commit)  # modi
                     wandb.log({'Max_Std/{}'.format(model_eval): best_std[model_eval]}, commit=commit)  # modi
-                    wandb.log({'Best_Syn_Lr/{}'.format(model_eval): args.lr_net}, commit=commit)
 
             if it in eval_it_pool and (save_this_it or it % 1000 == 0):
                 with torch.no_grad():
                     image_save = image_syn.cuda()
 
-                    save_dir = os.path.join(".", "logged_files", args.dataset, args.run_name, seg_path)        # modi
+                    save_dir = os.path.join(args.save_dir, args.dataset, args.run_name, seg_path)        # modi
 
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
@@ -310,6 +322,7 @@ def main(args):
                         torch.save(label_syn.cpu(), os.path.join(save_dir, "labels_best.pt"))
                         best_syn_lr = args.lr_net
 
+                        wandb.log({'Best_Syn_Lr/{}'.format(model_eval): best_syn_lr}, commit=commit)
 
                     wandb.log({seg_path+"/Pixels": wandb.Histogram(torch.nan_to_num(image_syn.detach().cpu()))}, commit=commit)     # modi
 
@@ -403,8 +416,8 @@ def main(args):
             starting_params = torch.cat([p.data.to(args.device).reshape(-1) for p in starting_params], 0)
 
             if args.reparam_syn:
-                syn_images = torch.concat([image_best, image_syn], dim=0)
-                y_hat = torch.concat([label_best, label_syn.to(args.device)], dim=0)
+                syn_images = torch.concat([images_best[-1], image_syn], dim=0)
+                y_hat = torch.concat([labels_best[-1], label_syn.to(args.device)], dim=0)
             else:
                 syn_images = image_syn
                 y_hat = label_syn.to(args.device)
@@ -527,6 +540,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
     parser.add_argument('--buffer_path', type=str, default='./buffers', help='buffer path')
+    parser.add_argument('--save_dir', type=str, default='./logged_files', help='save path')
+    parser.add_argument('--image_path', type=str, default='./logged_files', help='image path')
 
     # modi: expert_epochs的含义变为总轨迹的训练长度
     parser.add_argument('--expert_epochs', type=int, default=3, help='how many expert epochs the target params are')
@@ -558,8 +573,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--reparam_syn', action='store_true')
     parser.add_argument('--run_name', type=str, default=None, help="run_name")
-    parser.add_argument('--file_name', type=str, default=None, help="file_name(epoch)")
-    parser.add_argument('--reparam_syn_lr', type=float, default=None, help="reparam_syn_lr")
+    parser.add_argument('--files_name', type=str, default=None, help="file_name(epoch)")
+    parser.add_argument('--lrs_net', type=str, default=None, help="lrs_net")
 
     args = parser.parse_args()
 
