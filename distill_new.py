@@ -275,7 +275,7 @@ def main(args):
                 with torch.no_grad():
                     image_save = image_syn.cuda()
 
-                    save_dir = os.path.join(".", "logged_files", args.dataset, args.run_name, seg_path)        # modi
+                    save_dir = os.path.join(args.save_dir, args.dataset, args.run_name, seg_path)        # modi
 
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
@@ -501,6 +501,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
     parser.add_argument('--buffer_path', type=str, default='./buffers', help='buffer path')
+    parser.add_argument('--save_dir', type=str, default='"./logged_files', help='save path')
 
     # modi: expert_epochs的含义变为总轨迹的训练长度
     parser.add_argument('--expert_epochs', type=int, default=3, help='how many expert epochs the target params are')
