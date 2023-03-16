@@ -1,13 +1,15 @@
 # adapted from
 # https://github.com/VICO-UoE/DatasetCondensation
-
+import pdb
 import time
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Any, Callable, Optional, Tuple
 import os
 import kornia as K
+from PIL import Image
 import tqdm
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
@@ -43,7 +45,7 @@ class Config:
 
 config = Config()
 
-def get_dataset(dataset, data_path, batch_size=1, subset="imagenette", args=None):
+def get_dataset(dataset, data_path, batch_size=1, subset="imagenette", args=None, record=False):
 
     class_map = None
     loader_train_dict = None
@@ -59,7 +61,7 @@ def get_dataset(dataset, data_path, batch_size=1, subset="imagenette", args=None
             transform = transforms.Compose([transforms.ToTensor()])
         else:
             transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
-        dst_train = datasets.CIFAR10(data_path, train=True, download=True, transform=transform) # no augmentation
+        dst_train = datasets.CIFAR10(data_path, train=True, download=True, transform=transform)
         dst_test = datasets.CIFAR10(data_path, train=False, download=True, transform=transform)
         class_names = dst_train.classes
         class_map = {x:x for x in range(num_classes)}
@@ -147,7 +149,8 @@ def get_dataset(dataset, data_path, batch_size=1, subset="imagenette", args=None
         zca = K.enhance.ZCAWhitening(eps=0.1, compute_inv=True)
         zca.fit(images)
         zca_images = zca(images).to("cpu")
-        dst_train = TensorDataset(zca_images, labels)
+        dst_train = TensorDataset(zca_images, labels,record=record)
+
 
         images = []
         labels = []
@@ -160,7 +163,7 @@ def get_dataset(dataset, data_path, batch_size=1, subset="imagenette", args=None
         labels = torch.tensor(labels, dtype=torch.long, device="cpu")
 
         zca_images = zca(images).to("cpu")
-        dst_test = TensorDataset(zca_images, labels)
+        dst_test = TensorDataset(zca_images, labels,record=record)
 
         args.zca_trans = zca
 
@@ -173,12 +176,16 @@ def get_dataset(dataset, data_path, batch_size=1, subset="imagenette", args=None
 
 
 class TensorDataset(Dataset):
-    def __init__(self, images, labels): # images: n x c x h x w tensor
+    def __init__(self, images, labels,record=False): # images: n x c x h x w tensor
         self.images = images.detach().float()
         self.labels = labels.detach()
+        self.record = record
 
     def __getitem__(self, index):
-        return self.images[index], self.labels[index]
+        if self.record:
+            return self.images[index], self.labels[index], index
+        else:
+            return self.images[index], self.labels[index]
 
     def __len__(self):
         return self.images.shape[0]
@@ -283,8 +290,8 @@ def get_network(model, channel, num_classes, im_size=(32, 32), dist=True):
         gpu_num = torch.cuda.device_count()
         if gpu_num>0:
             device = 'cuda'
-            if gpu_num>1:
-                net = nn.DataParallel(net)
+            #if gpu_num>1:
+                #net = nn.DataParallel(net)
         else:
             device = 'cpu'
         net = net.to(device)
@@ -292,12 +299,11 @@ def get_network(model, channel, num_classes, im_size=(32, 32), dist=True):
     return net
 
 
-
 def get_time():
     return str(time.strftime("[%Y-%m-%d %H:%M:%S]", time.localtime()))
 
 
-def epoch(mode, dataloader, net, optimizer, criterion, args, aug, texture=False):
+def epoch(mode, dataloader, net, optimizer, criterion, args, aug, texture=False, flat_parameter=None, record=False):
     loss_avg, acc_avg, num_exp = 0, 0, 0
     net = net.to(args.device)
 
@@ -309,9 +315,12 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug, texture=False)
     else:
         net.eval()
 
+    losses = np.zeros(len(dataloader.dataset))
     for i_batch, datum in enumerate(dataloader):
         img = datum[0].float().to(args.device)
         lab = datum[1].long().to(args.device)
+        if record:
+            ind = datum[2].long()
 
         if mode == "train" and texture:
             img = torch.cat([torch.stack([torch.roll(im, (torch.randint(args.im_size[0]*args.canvas_size, (1,)), torch.randint(args.im_size[0]*args.canvas_size, (1,))), (1,2))[:,:args.im_size[0],:args.im_size[1]] for im in img]) for _ in range(args.canvas_samples)])
@@ -327,20 +336,31 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug, texture=False)
             lab = torch.tensor([class_map[x.item()] for x in lab]).to(args.device)
 
         n_b = lab.shape[0]
-
-        output = net(img)
+        if flat_parameter is None:
+            output = net(img)
+        else:
+            output = net(img, flat_param=flat_parameter)
         loss = criterion(output, lab)
 
-        acc = np.sum(np.equal(np.argmax(output.cpu().data.numpy(), axis=-1), lab.cpu().data.numpy()))
 
-        loss_avg += loss.item()*n_b
-        acc_avg += acc
-        num_exp += n_b
+        if criterion.reduction == "none":
+            if record:
+                losses[ind] = loss.cpu().numpy()
 
-        if mode == 'train':
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        else:
+            acc = np.sum(np.equal(np.argmax(output.cpu().data.numpy(), axis=-1), lab.cpu().data.numpy()))
+
+            loss_avg += loss.item()*n_b
+            acc_avg += acc
+            num_exp += n_b
+
+            if mode == 'train':
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+    if record:
+        return losses
 
     loss_avg /= num_exp
     acc_avg /= num_exp
