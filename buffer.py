@@ -68,13 +68,25 @@ def main(args):
     print('DC augmentation parameters: \n', args.dc_aug_param)
 
     if args.reparam_syn:
-        image_path = os.path.join(args.syn_image_path, args.dataset, args.run_name, args.file_name)
-        save_dir = os.path.join(image_path, 'buffer')
-        image_syn = torch.load(os.path.join(image_path, 'images_best.pt'))
-        label_syn = torch.load(os.path.join(image_path, 'labels_best.pt'))
+        image_path = os.path.join(args.syn_image_path, args.dataset, args.run_name)
+        images_best = []
+        labels_best = []
+        args.lrs_net = [torch.tensor(eval(lr)).to(args.device).item() for lr in args.lrs_net.split(',')]
+        for f in args.files_name.split(','):
+            if images_best:
+                image_syn = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, 'images_best.pt'))], dim=0)
+                label_syn = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, 'labels_best.pt'))], dim=0)
+            else:
+                image_syn = torch.load(os.path.join(image_path, f, 'images_best.pt'))
+                label_syn = torch.load(os.path.join(image_path, f, 'labels_best.pt'))
+            if args.dsa and (not args.no_aug):
+                DiffAugment(image_syn, args.dsa_strategy, param=args.dsa_param)
+            images_best.append(image_syn)
+            labels_best.append(label_syn)
 
-        if args.dsa and (not args.no_aug):
-            DiffAugment(image_syn, args.dsa_strategy, param=args.dsa_param)
+        save_dir = os.path.join(image_path, f, 'buffer', args.model)
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
 
     for it in range(0, args.num_experts):
@@ -85,15 +97,15 @@ def main(args):
         if args.reparam_syn:
             net_eval = get_network(args.model, channel, num_classes, im_size).to(
                 args.device)  # get a random model
-            args.lr_net = torch.tensor(args.lr_net).to(args.device).requires_grad_(True).item()
-            eval_labs = label_syn
-            with torch.no_grad():
-                image_save = image_syn
-            image_syn_eval, label_syn_eval = copy.deepcopy(image_save.detach()), copy.deepcopy(eval_labs.detach())  # avoid any unaware modification
-
-            net_eval, acc_train, acc_test = evaluate_synset(it, net_eval, image_syn_eval, label_syn_eval,
-                                                            testloader, args,
-                                                            texture=args.texture)
+            for image_syn, label_syn, lr in zip(images_best, labels_best, args.lrs_net):
+                eval_labs = label_syn
+                args.lr_net = lr
+                with torch.no_grad():
+                    image_save = image_syn
+                image_syn_eval, label_syn_eval = copy.deepcopy(image_save.detach()), copy.deepcopy(eval_labs.detach())  # avoid any unaware modification
+                net_eval, acc_train, acc_test = evaluate_synset(it, net_eval, image_syn_eval, label_syn_eval,
+                                                                testloader, args,
+                                                                texture=args.texture, printer=True)
             teacher_net.load_state_dict(net_eval.state_dict())
 
         lr = args.lr_teacher
@@ -149,7 +161,6 @@ if __name__ == '__main__':
                         help='differentiable Siamese augmentation strategy')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
     parser.add_argument('--buffer_path', type=str, default='./buffers', help='buffer path')
-    parser.add_argument('--epoch_eval_train', type=int, default=1000, help='epochs to train a model with synthetic data')
     parser.add_argument('--train_epochs', type=int, default=50)
     parser.add_argument('--zca', action='store_true')
     parser.add_argument('--decay', action='store_true')
@@ -158,11 +169,13 @@ if __name__ == '__main__':
     parser.add_argument('--save_interval', type=int, default=10)
 
     parser.add_argument('--reparam_syn', action='store_true')
-    parser.add_argument('--syn_image_path', type=str, default="logged_files", help="syn_image_path")
+    parser.add_argument('--epoch_eval_train', type=int, default=1000,
+                        help='epochs to train a model with synthetic data')
+    parser.add_argument('--syn_image_path', type=str, default='logged_files', help="syn_image_path")
     parser.add_argument('--run_name', type=str, default=None, help="run_name")
-    parser.add_argument('--file_name', type=str, default=None, help="file_name(epoch)")
+    parser.add_argument('--files_name', type=str, default=None, help="file_name(epoch)")
     parser.add_argument('--no_aug', type=bool, default=False, help='this turns off diff aug during distillation')
-    parser.add_argument('--lr_net', type=float, default=0.01, help='the learning rate in the eval model')
+    parser.add_argument('--lrs_net', type=str, default='0.01', help='the learning rate in the eval model')
     parser.add_argument('--texture', action='store_true', help="will distill textures instead")
 
     args = parser.parse_args()
