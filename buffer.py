@@ -10,6 +10,7 @@ from random import choice
 from reparam_module import ReparamModule
 
 import warnings
+import pdb
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def main(args):
@@ -28,8 +29,6 @@ def main(args):
     if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
         save_dir += "_NO_ZCA"
     save_dir = os.path.join(save_dir, args.model)
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
 
 
     ''' organize the real dataset '''
@@ -84,9 +83,14 @@ def main(args):
             images_best.append(image_syn)
             labels_best.append(label_syn)
 
-        save_dir = os.path.join(image_path, f, 'buffer', args.model)
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
+        save_dir = aos.path.join(image_path, f, 'buffer')
+        if args.dataset == "ImageNet":
+            expert_dir = os.path.join(expert_dir, args.subset, str(args.res))
+        if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
+            expert_dir += "_NO_ZCA"
+        save_dir = os.path.join(expert_dir, args.model)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
 
 
     for it in range(0, args.num_experts):

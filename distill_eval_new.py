@@ -14,6 +14,7 @@ import copy
 import random
 import math
 from reparam_module import ReparamModule
+torch.cuda.empty_cache()
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -110,7 +111,7 @@ def main(args):
 
     #modi: 提前初始化expert file代码位置
     ''' initialize expert file'''
-    expert_dir = args.buffer_path
+    expert_dir = os.path.join(args.buffer_path, args.dataset)
     if args.dataset == "ImageNet":
         expert_dir = os.path.join(expert_dir, args.subset, str(args.res))
     if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
@@ -293,6 +294,7 @@ def main(args):
                         _, acc_train, acc_test = evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args, texture=args.texture, printer=True)
                         accs_test.append(acc_test)
                         accs_train.append(acc_train)
+                        del net_eval, image_syn_eval, label_syn_eval
                     accs_test = np.array(accs_test)
                     accs_train = np.array(accs_train)
                     acc_test_mean = np.mean(accs_test)
