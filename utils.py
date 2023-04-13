@@ -133,6 +133,38 @@ def get_dataset(dataset, data_path, batch_size=1, subset="imagenette", args=None
         class_names = dst_train.classes
         class_map = {x: x for x in range(num_classes)}
 
+    elif dataset.startswith('SVHN'):
+        channel = 3
+        im_size = (32, 32)
+        num_classes = 10
+        mean = [0.4377, 0.4438, 0.4728]
+        std = [0.1980, 0.2010, 0.1970]
+
+        if args.zca:
+            transform = transforms.Compose([transforms.ToTensor()])
+        else:
+            transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
+        try:
+            dst_train = datasets.SVHN(os.path.join(args.data_path, 'svhn'),
+                                          split='train',
+                                          download=False,
+                                          transform=transform)  # no augmentation
+            dst_test = datasets.SVHN(os.path.join(args.data_path, 'svhn'),
+                                        split='test',
+                                        download=False,
+                                        transform=transform)
+        except:
+            dst_train = datasets.SVHN(os.path.join(args.data_path, 'svhn'),
+                                          split='train',
+                                          download=True,
+                                          transform=transform)  # no augmentation
+            dst_test = datasets.SVHN(os.path.join(args.data_path, 'svhn'),
+                                        split='test',
+                                        download=True,
+                                        transform=transform)
+        class_names = 10
+        class_map = {x: x for x in range(num_classes)}
+
     else:
         exit('unknown dataset: %s'%dataset)
 

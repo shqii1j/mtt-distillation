@@ -114,7 +114,7 @@ def main(args):
     expert_dir = args.buffer_path
     if args.dataset == "ImageNet":
         expert_dir = os.path.join(expert_dir, args.subset, str(args.res))
-    if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
+    if args.dataset in ["CIFAR10", "CIFAR100", "SVHN"] and not args.zca:
         expert_dir += "_NO_ZCA"
     expert_dir = os.path.join(expert_dir, args.model)
 
@@ -179,11 +179,11 @@ def main(args):
         image_path = os.path.join(args.image_path, args.dataset, args.run_name)
         for f in args.files_name.split(','):
             if images_best:
-                img = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, 'images_best.pt')).to(args.device).requires_grad_(False)], dim=0)
-                lab = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, 'labels_best.pt')).to(args.device)], dim=0)
+                img = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, 'ema_images_best.pt')).to(args.device).requires_grad_(False)], dim=0)
+                lab = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, 'ema_labels_best.pt')).to(args.device)], dim=0)
             else:
-                img = torch.load(os.path.join(image_path, f, 'images_best.pt')).to(args.device).requires_grad_(False)
-                lab = torch.load(os.path.join(image_path, f, 'labels_best.pt')).to(args.device)
+                img = torch.load(os.path.join(image_path, f, 'ema_images_best.pt')).to(args.device).requires_grad_(False)
+                lab = torch.load(os.path.join(image_path, f, 'ema_labels_best.pt')).to(args.device)
             images_best.append(img)
             labels_best.append(lab)
         print('load images_best ...')
@@ -379,7 +379,7 @@ def main(args):
                     if save_this_it:
                         torch.save(ema_image_save.cpu(), os.path.join(ema_save_dir, "ema_images_best.pt".format(it)))
                         torch.save(label_syn.cpu(), os.path.join(ema_save_dir, "ema_labels_best.pt".format(it)))
-                        wandb.log({seg_path+'/ema_Best_Syn_Lr/{}'.format(model_eval): best_syn_lr}, commit=commit)
+                        wandb.log({seg_path+'/ema_Best_Syn_Lr/{}'.format(model_eval): syn_lr}, commit=commit)
 
                     wandb.log({seg_path+"/ema_Pixels": wandb.Histogram(torch.nan_to_num(ema_image_syn.detach().cpu()))}, step=it)
 

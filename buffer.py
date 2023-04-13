@@ -26,7 +26,7 @@ def main(args):
     save_dir = os.path.join(args.buffer_path, args.dataset)
     if args.dataset == "ImageNet":
         save_dir = os.path.join(save_dir, args.subset, str(args.res))
-    if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
+    if args.dataset in ["CIFAR10", "CIFAR100", "SVHN"] and not args.zca:
         save_dir += "_NO_ZCA"
     save_dir = os.path.join(save_dir, args.model)
 
@@ -66,6 +66,11 @@ def main(args):
     args.dc_aug_param['strategy'] = 'crop_scale_rotate'  # for whole-dataset training
     print('DC augmentation parameters: \n', args.dc_aug_param)
 
+    if args.ema:
+        ema = "ema_"
+    else:
+        ema = ""
+
     if args.reparam_syn:
         image_path = os.path.join(args.syn_image_path, args.dataset, args.run_name)
         images_best = []
@@ -73,22 +78,22 @@ def main(args):
         args.lrs_net = [torch.tensor(eval(lr)).to(args.device).item() for lr in args.lrs_net.split(',')]
         for f in args.files_name.split(','):
             if images_best:
-                image_syn = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, 'images_best.pt'))], dim=0)
-                label_syn = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, 'labels_best.pt'))], dim=0)
+                image_syn = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, ema+'images_best.pt'))], dim=0)
+                label_syn = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, ema+'labels_best.pt'))], dim=0)
             else:
-                image_syn = torch.load(os.path.join(image_path, f, 'images_best.pt'))
-                label_syn = torch.load(os.path.join(image_path, f, 'labels_best.pt'))
+                image_syn = torch.load(os.path.join(image_path, f, ema+'images_best.pt'))
+                label_syn = torch.load(os.path.join(image_path, f, ema+'labels_best.pt'))
             if args.dsa and (not args.no_aug):
                 DiffAugment(image_syn, args.dsa_strategy, param=args.dsa_param)
             images_best.append(image_syn)
             labels_best.append(label_syn)
 
-        save_dir = aos.path.join(image_path, f, 'buffer')
+        save_dir = os.path.join(image_path, f, 'buffer')
         if args.dataset == "ImageNet":
-            expert_dir = os.path.join(expert_dir, args.subset, str(args.res))
-        if args.dataset in ["CIFAR10", "CIFAR100"] and not args.zca:
-            expert_dir += "_NO_ZCA"
-        save_dir = os.path.join(expert_dir, args.model)
+            save_dir = os.path.join(save_dir, args.subset, str(args.res))
+        if args.dataset in ["CIFAR10", "CIFAR100", "SVHN"] and not args.zca:
+            save_dir += "_NO_ZCA"
+        save_dir = os.path.join(save_dir, args.model)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
@@ -182,6 +187,7 @@ if __name__ == '__main__':
     parser.add_argument('--lrs_net', type=str, default='0.01', help='the learning rate in the eval model')
     parser.add_argument('--texture', action='store_true', help="will distill textures instead")
 
+    parser.add_argument('--ema', action='store_true')
     args = parser.parse_args()
     main(args)
 
