@@ -15,6 +15,10 @@ from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 from scipy.ndimage.interpolation import rotate as scipyrotate
 from networks import MLP, ConvNet, LeNet, AlexNet, VGG11BN, VGG11, ResNet18, ResNet18BN_AP, ResNet18_AP
+import zipfile
+import requests
+import glob
+from shutil import move
 
 class Config:
     imagenette = [0, 217, 482, 491, 497, 566, 569, 571, 574, 701]
@@ -73,12 +77,51 @@ def get_dataset(dataset, data_path, batch_size=1, subset="imagenette", args=None
         num_classes = 200
         mean = [0.485, 0.456, 0.406]
         std = [0.229, 0.224, 0.225]
+
+        if not os.path.exists(data_path+"/tiny-imagenet-200"):
+            url = "http://cs231n.stanford.edu/tiny-imagenet-200.zip"
+            path = "tiny-imagenet-200.zip"
+            r = requests.get(url)
+            try:
+                with open(path, "wb") as code:
+                    code.write(r.content)
+                zip_file = zipfile.ZipFile(path)
+                zip_list = zip_file.namelist()  # 得到压缩包里所有文件
+
+                for f in zip_list:
+                    zip_file.extract(f, data_path)  # 循环解压文件到指定目录
+                zip_file.close()
+
+                val_dict = {}
+                with open(data_path+'/tiny-imagenet-200/val/val_annotations.txt', 'r') as f:
+                    for line in f.readlines():
+                        split_line = line.split('\t')
+                        val_dict[split_line[0]] = split_line[1]
+
+                paths = glob.glob(data_path+'/tiny-imagenet-200/val/images/*')
+                for path in paths:
+                    file = path.split('/')[-1]
+                    folder = val_dict[file]
+                    if not os.path.exists(data_path+"/tiny-imagenet-200/val/" + str(folder)):
+                        os.mkdir(data_path+"/tiny-imagenet-200/val/" + str(folder))
+                        os.mkdir(data_path+"/tiny-imagenet-200/val/" + str(folder) + '/images')
+
+                for path in paths:
+                    file = path.split('/')[-1]
+                    folder = val_dict[file]
+                    dest = data_path+"/tiny-imagenet-200/val/" + str(folder) + '/images/' + str(file)
+                    move(path, dest)
+
+                os.rmdir(data_path+'/tiny-imagenet-200/val/images')
+            except FileNotFoundError:
+                print("FileNotFoundError")
+
         if args.zca:
             transform = transforms.Compose([transforms.ToTensor()])
         else:
             transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
-        dst_train = datasets.ImageFolder(os.path.join(data_path, "train"), transform=transform) # no augmentation
-        dst_test = datasets.ImageFolder(os.path.join(data_path, "val", "images"), transform=transform)
+        dst_train = datasets.ImageFolder(os.path.join(data_path+"/tiny-imagenet-200", "train"), transform=transform) # no augmentation
+        dst_test = datasets.ImageFolder(os.path.join(data_path+"/tiny-imagenet-200", "val"), transform=transform)
         class_names = dst_train.classes
         class_map = {x:x for x in range(num_classes)}
 
@@ -162,6 +205,21 @@ def get_dataset(dataset, data_path, batch_size=1, subset="imagenette", args=None
                                         split='test',
                                         download=True,
                                         transform=transform)
+        class_names = 10
+        class_map = {x: x for x in range(num_classes)}
+
+    elif args.dataset == 'mnist':
+        channel = 1
+        im_size = (28, 28)
+        num_classes = 10
+        mean = [0.1307]
+        std = [0.3081]
+        dst_train = datasets.MNIST(os.path.join(args.data_path, 'mnist'), train=True, download=True, transform=transforms.ToTensor())
+
+        normalize = transforms.Normalize(mean=mean, std=std)
+        transform_test = transforms.Compose([transforms.ToTensor(), normalize])
+
+        dst_test = datasets.MNIST(os.path.join(args.data_path, 'mnist'), train=False, download=True, transform=transform_test)
         class_names = 10
         class_map = {x: x for x in range(num_classes)}
 
