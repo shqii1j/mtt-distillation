@@ -574,7 +574,7 @@ def get_daparam(dataset, model, model_eval, ipc):
     dc_aug_param['noise'] = 0.001
     dc_aug_param['strategy'] = 'none'
 
-    if dataset == 'MNIST':
+    if dataset == 'mnist':
         dc_aug_param['strategy'] = 'crop_scale_rotate'
 
     if model_eval in ['ConvNetBN']:  # Data augmentation makes model training with Batch Norm layer easier.
