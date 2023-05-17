@@ -87,8 +87,6 @@ def main(args):
             img = torch.load(os.path.join(image_path,f,image_name)).to(args.device).requires_grad_(True)
             lab = torch.load(os.path.join(image_path,f,labels_name))
 
-            if args.dsa and (not args.no_aug):
-                DiffAugment(img, args.dsa_strategy, param=args.dsa_param)
 
             if img_l:
                 img_l.append(torch.cat([img_l[-1], img], dim=0))
@@ -105,18 +103,24 @@ def main(args):
 
     model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
 
+    args.lr_nets = args.lr_nets.split(',')
 
+    if args.dsa:
+        print('DSA augmentation strategy: \n', args.dsa_strategy)
+        print('DSA augmentation parameters: \n', args.dsa_param.__dict__)
+    else:
+        print('DC augmentation parameters: \n', args.dc_aug_param)
 
-    for model_eval in model_eval_pool:
-        if args.dsa:
-            print('DSA augmentation strategy: \n', args.dsa_strategy)
-            print('DSA augmentation parameters: \n', args.dsa_param.__dict__)
+    acc_test_mean = dict()
+    acc_test_std = dict()
+
+    for i, model_eval in enumerate(model_eval_pool):
+        if isinstance(model_eval, str):
+            print(f'EVAL: {model_eval} ---------------')
         else:
-            print('DC augmentation parameters: \n', args.dc_aug_param)
-
+            print(f'EVAL: model_{i} ---------------')
         accs_test = []
         accs_train = []
-        args.lr_nets = args.lr_nets.split(',')
 
         for it_eval in range(args.num_eval):
             net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device)  # get a random model
@@ -138,10 +142,16 @@ def main(args):
 
         accs_test = np.array(accs_test)
         accs_train = np.array(accs_train)
-        acc_test_mean = np.mean(accs_test)
-        acc_test_std = np.std(accs_test)
-        print(acc_test_mean)
-        print(acc_test_std)
+        if isinstance(model_eval,str):
+            acc_test_mean[model_eval] = np.mean(accs_test)
+            acc_test_std[model_eval] = np.std(accs_test)
+        else:
+            acc_test_mean['model_'+str(i)] = np.mean(accs_test)
+            acc_test_std['model_'+str(i)] = np.std(accs_test)
+        print(np.mean(accs_test), np.std(accs_test))
+    print(acc_test_mean)
+    print(acc_test_std)
+
 
 
 if __name__ == '__main__':
