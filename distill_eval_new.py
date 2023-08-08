@@ -46,10 +46,8 @@ def main(args):
     for key in model_eval_pool:
         accs_all_exps[key] = []
 
-    data_save = []
 
     if args.dsa:
-        # args.epoch_eval_train = 1000
         args.dc_aug_param = None
 
     args.dsa_param = ParamDiffAug()
@@ -74,16 +72,13 @@ def main(args):
     args.dsa_param = dsa_params
     args.zca_trans = zca_trans
 
-    # if args.batch_syn is None:
-    #     args.batch_syn = num_classes * args.ipc
-
     args.distributed = torch.cuda.device_count() > 1
 
 
     print('Hyper-parameters: \n', args.__dict__)
     print('Evaluation model pool: ', model_eval_pool)
 
-    ''' organize the real dataset '''
+    ''' Organize the real dataset '''
     images_all = []
     labels_all = []
     indices_class = [[] for c in range(num_classes)]
@@ -109,11 +104,10 @@ def main(args):
         idx_shuffle = np.random.permutation(indices_class[c])[:n]
         return images_all[idx_shuffle]
 
-    #modi: 提前初始化expert file代码位置
-    ''' initialize expert file'''
+    ''' Initialize expert file'''
     expert_dir = args.buffer_path
     if args.dataset == "ImageNet":
-        expert_dir = os.path.join(expert_dir, args.subset, str(args.res))
+        expert_dir = os.path.join(expert_dir, args.subset)
     if args.dataset in ["CIFAR10", "CIFAR100", "SVHN"] and not args.zca:
         expert_dir += "_NO_ZCA"
     expert_dir = os.path.join(expert_dir, args.model)
@@ -123,7 +117,6 @@ def main(args):
     if not args.reparam_syn:
         args.run_name = wandb.run.name
 
-
     if args.load_all:
         buffer = []
         n = 0
@@ -132,7 +125,6 @@ def main(args):
             n += 1
         if n == 0:
             raise AssertionError("No buffers detected at {}".format(expert_dir))
-
     else:
         expert_files = []
         n = 0
@@ -152,26 +144,8 @@ def main(args):
             buffer = buffer[:args.max_experts]
         random.shuffle(buffer)
 
-    # modi: expert分段
-    if args.intervals:
-        intervals = [(eval(i.split('-')[0]), eval(i.split('-')[1])) for i in args.intervals.split(",")]
-        print(f'Intervals: {intervals}')
-    elif args.interval:
-        intervals = [(i, i+args.interval-1) if i+args.interval<=args.max_end_epoch else (i, args.max_end_epoch) for i in range(0, args.max_end_epoch-args.overlap+1, args.interval-args.overlap)]
-        print(f'Interval: {args.interval}')
-        print(f'Intervals: {intervals}')
-    else:
-        interval = math.ceil((args.max_end_epoch+1+args.overlap*(args.segments-1))/args.segments)
-        print(f'Interval: {interval}')
-        intervals = [(i, i+interval-1) if i+interval<=args.max_end_epoch else (i, args.max_end_epoch) for i in range(0, args.max_end_epoch-args.overlap+1, interval-args.overlap)]
-        print(f'Intervals: {intervals}')
-    if args.ipcs:
-        ipcs = [eval(_) for _ in args.ipcs.split(',')]
-    else:
-        ipcs = [args.ipc] * len(intervals)
 
-
-    # modi: image_best
+    ''' *Load previous subsets'''
     if args.reparam_syn:
         images_best = []
         labels_best = []
@@ -186,28 +160,32 @@ def main(args):
                 lab = torch.load(os.path.join(image_path, f, 'labels_best.pt')).to(args.device)
             images_best.append(img)
             labels_best.append(lab)
-        print('load images_best ...')
 
-    # modi: 建立分段循环
+
+    ''' *Distill '''
+    intervals = [(eval(i.split('-')[0]), eval(i.split('-')[1])) for i in args.intervals.split(",")]
+    print(f'Intervals: {intervals}')
+    if args.ipcs:
+        ipcs = [eval(_) for _ in args.ipcs.split(',')]
+    else:
+        ipcs = [args.ipc] * len(intervals)
+
     for k, inter in enumerate(intervals):
-        start_epoch = inter[0]          # modi
-        end_epoch = inter[1]            # modi
-        ipc = ipcs[k]                   # modi
-        if args.batch_syn == None:                 # modi
+        start_epoch = inter[0]
+        end_epoch = inter[1]
+        ipc = ipcs[k]
+        if args.batch_syn == None:
             batch_syn = num_classes * ipc
-        else:                                      # modi
+        else:
             batch_syn = args.batch_syn
         print(f'\n\n\nTraining epoch from {start_epoch} to {end_epoch}, with {ipc} ipc')
 
         ''' initialize the synthetic data '''
         label_syn = torch.tensor([np.ones(ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
-
         if args.texture:
             image_syn = torch.randn(size=(num_classes * ipc, channel, im_size[0]*args.canvas_size, im_size[1]*args.canvas_size), dtype=torch.float)
         else:
             image_syn = torch.randn(size=(num_classes * ipc, channel, im_size[0], im_size[1]), dtype=torch.float)
-
-        syn_lr = torch.tensor(args.lr_teacher).to(args.device)
 
         if args.pix_init == 'real':
             print('initialize synthetic data from random real images')
@@ -226,6 +204,7 @@ def main(args):
 
         ''' training '''
         image_syn = image_syn.detach().to(args.device).requires_grad_(True)
+        syn_lr = torch.tensor(args.lr_teacher).to(args.device)
         syn_lr = syn_lr.detach().to(args.device).requires_grad_(True)
         optimizer_img = torch.optim.SGD([image_syn], lr=args.lr_img, momentum=0.5)
         optimizer_lr = torch.optim.SGD([syn_lr], lr=args.lr_lr, momentum=0.5)
@@ -234,22 +213,19 @@ def main(args):
         criterion = nn.CrossEntropyLoss().to(args.device)
         print('%s training begins'%get_time())
 
-
         best_acc = {m: 0 for m in model_eval_pool}
-
         best_std = {m: 0 for m in model_eval_pool}
 
-        seg_path = "{}-{}".format(start_epoch, end_epoch) # modi
+        seg_path = "{}-{}".format(start_epoch, end_epoch)
         if args.files_name:
             seg_path = seg_path + '+' + wandb.run.name
 
         for it in range(0, args.Iteration+1):
             save_this_it = False
-            commit = False              # modi: wanbd.commit提交每段评估结果
+            commit = False
             if it == args.Iteration // 1000 * 1000:
                 commit = True
 
-            # writer.add_scalar('Progress', it, it)
             ''' Evaluate synthetic data '''
             if it in eval_it_pool:
                 for model_eval in model_eval_pool:
@@ -262,10 +238,7 @@ def main(args):
 
                     accs_test = []
                     accs_train = []
-                    # print(model_eval,it,image_syn[0][0][0],label_syn[0],channel, num_classes, im_size)
-                    # print('\n')
-                    # print(syn_lr.item(),args.batch_train,args.dsa_param,args.dc_aug_param)
-                    # print('\n')
+
                     for it_eval in range(args.num_eval):
                         net_eval = get_network(model_eval, channel, num_classes, im_size).to(args.device) # get a random model
                         if args.reparam_syn:
@@ -376,8 +349,9 @@ def main(args):
 
             wandb.log({seg_path+"/Synthetic_LR": syn_lr.detach().cpu()}, commit=commit)     # modi
 
-            student_net = get_network(args.model, channel, num_classes, im_size, dist=False).to(args.device)  # get a random model
 
+            ''' *Initialize student network'''
+            student_net = get_network(args.model, channel, num_classes, im_size, dist=False).to(args.device)  # get a random model
             student_net = ReparamModule(student_net)
 
             if args.distributed:
@@ -406,7 +380,6 @@ def main(args):
                         buffer = buffer[:args.max_experts]
                     random.shuffle(buffer)
 
-            # modi: 分段初始化。
             rn_start_epoch = np.random.randint(start_epoch, end_epoch - args.expert_epochs)
             starting_params = expert_trajectory[rn_start_epoch]
 
@@ -414,7 +387,6 @@ def main(args):
             target_params = torch.cat([p.data.to(args.device).reshape(-1) for p in target_params], 0)
 
             student_params = [torch.cat([p.data.to(args.device).reshape(-1) for p in starting_params], 0).requires_grad_(True)]
-
             starting_params = torch.cat([p.data.to(args.device).reshape(-1) for p in starting_params], 0)
 
             if args.reparam_syn:
@@ -429,13 +401,12 @@ def main(args):
             indices_chunks = []
 
             for step in range(args.syn_steps):
-
+                ''' *update student network'''
                 if not indices_chunks:
                     indices = torch.randperm(len(syn_images))
                     indices_chunks = list(torch.split(indices, batch_syn))
 
                 these_indices = indices_chunks.pop()
-
 
                 x = syn_images[these_indices]
                 this_y = y_hat[these_indices]
@@ -451,6 +422,7 @@ def main(args):
                     forward_params = student_params[-1].unsqueeze(0).expand(torch.cuda.device_count(), -1)
                 else:
                     forward_params = student_params[-1]
+
                 x = student_net(x, flat_param=forward_params)
                 ce_loss = criterion(x, this_y)
 
@@ -458,7 +430,7 @@ def main(args):
 
                 student_params.append(student_params[-1] - syn_lr * grad)
 
-
+            ''' *Update synthetic dataset'''
             param_loss = torch.tensor(0.0).to(args.device)
             param_dist = torch.tensor(0.0).to(args.device)
 
@@ -467,7 +439,6 @@ def main(args):
 
             param_loss_list.append(param_loss)
             param_dist_list.append(param_dist)
-
 
             param_loss /= num_params
             param_dist /= num_params
@@ -493,7 +464,6 @@ def main(args):
 
             if it%10 == 0:
                 print('%s iter = %04d, loss = %.4f' % (get_time(), it, grand_loss.item()))
-
 
 
     wandb.finish()
@@ -545,17 +515,11 @@ if __name__ == '__main__':
     parser.add_argument('--save_dir', type=str, default='./logged_files', help='save path')
     parser.add_argument('--image_path', type=str, default='./logged_files', help='image path')
 
-    # modi: expert_epochs的含义变为总轨迹的训练长度
     parser.add_argument('--expert_epochs', type=int, default=3, help='how many expert epochs the target params are')
     parser.add_argument('--syn_steps', type=int, default=20, help='how many steps to take on synthetic data')
     parser.add_argument('--max_end_epoch', type=int, default=25, help='the final expert epoch we should learn')
 
-    # modi: 分段参数
-    parser.add_argument('--overlap', type=int, default=1, help='the overlap num of params between segment student params')
-    parser.add_argument('--segments', type=int, default=5, help='Number of student trajectory segments')
-    parser.add_argument('--interval', type=int, default=None, help='using fixed interval length to segment student trajectory')
-    parser.add_argument('--intervals', type=str, default=None,
-                        help='fixed intervals to segment student trajectory')
+    parser.add_argument('--intervals', type=str, default=None,help='fixed intervals to segment student trajectory')
 
     parser.add_argument('--zca', action='store_true', help="do ZCA whitening")
 

@@ -13,50 +13,39 @@ import warnings
 import pdb
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+''' *ema delete '''
 def main(args):
 
     args.dsa = True if args.dsa == 'True' else False
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     args.dsa_param = ParamDiffAug()
 
-
-    # print('\n================== Exp %d ==================\n '%exp)
     print('Hyper-parameters: \n', args.__dict__)
 
     save_dir = os.path.join(args.buffer_path, args.dataset)
-    if args.dataset == "ImageNet":
-        save_dir = os.path.join(save_dir, args.subset, str(args.res))
-    if args.dataset in ["CIFAR10", "CIFAR100", "SVHN", "mnist"] and not args.zca:
-        save_dir += "_NO_ZCA"
-    save_dir = os.path.join(save_dir, args.model)
 
 
-    ''' organize the real dataset '''
+    ''' Organize the real dataset '''
     channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader, loader_train_dict, class_map, class_map_inv = get_dataset(args.dataset, args.data_path, args.batch_real, args.subset, args=args)
 
     images_all = []
     labels_all = []
     indices_class = [[] for c in range(num_classes)]
+
     print("BUILDING DATASET")
     for i in tqdm(range(len(dst_train))):
         sample = dst_train[i]
         images_all.append(torch.unsqueeze(sample[0], dim=0))
         labels_all.append(class_map[torch.tensor(sample[1]).item()])
-
-    for i, lab in tqdm(enumerate(labels_all)):
-        indices_class[lab].append(i)
     images_all = torch.cat(images_all, dim=0).to("cpu")
     labels_all = torch.tensor(labels_all, dtype=torch.long, device="cpu")
 
+    for i, lab in tqdm(enumerate(labels_all)):
+        indices_class[lab].append(i)
     for c in range(num_classes):
         print('class c = %d: %d real images'%(c, len(indices_class[c])))
-
     for ch in range(channel):
         print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
-
-    criterion = nn.CrossEntropyLoss().to(args.device)
-
-    trajectories = []
 
     dst_train = TensorDataset(copy.deepcopy(images_all.detach()), copy.deepcopy(labels_all.detach()))
     trainloader = torch.utils.data.DataLoader(dst_train, batch_size=args.batch_train, shuffle=True, num_workers=0)
@@ -66,11 +55,8 @@ def main(args):
     args.dc_aug_param['strategy'] = 'crop_scale_rotate'  # for whole-dataset training
     print('DC augmentation parameters: \n', args.dc_aug_param)
 
-    if args.ema:
-        ema = "ema_"
-    else:
-        ema = ""
 
+    ''' *Load previous subsets '''
     if args.reparam_syn:
         image_path = os.path.join(args.syn_image_path, args.dataset, args.run_name)
         images_best = []
@@ -78,34 +64,37 @@ def main(args):
         args.lrs_net = [torch.tensor(eval(lr)).to(args.device).item() for lr in args.lrs_net.split(',')]
         for f in args.files_name.split(','):
             if images_best:
-                image_syn = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, ema+'images_best.pt'))], dim=0)
-                label_syn = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, ema+'labels_best.pt'))], dim=0)
+                image_syn = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, 'images_best.pt'))], dim=0)
+                label_syn = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, 'labels_best.pt'))], dim=0)
             else:
-                image_syn = torch.load(os.path.join(image_path, f, ema+'images_best.pt'))
-                label_syn = torch.load(os.path.join(image_path, f, ema+'labels_best.pt'))
+                image_syn = torch.load(os.path.join(image_path, f, 'images_best.pt'))
+                label_syn = torch.load(os.path.join(image_path, f, 'labels_best.pt'))
             if args.dsa and (not args.no_aug):
                 DiffAugment(image_syn, args.dsa_strategy, param=args.dsa_param)
             images_best.append(image_syn)
             labels_best.append(label_syn)
 
         save_dir = os.path.join(image_path, f, 'buffer')
-        if args.dataset == "ImageNet":
-            save_dir = os.path.join(save_dir, args.subset, str(args.res))
-        if args.dataset in ["CIFAR10", "CIFAR100", "SVHN"] and not args.zca:
-            save_dir += "_NO_ZCA"
-        save_dir = os.path.join(save_dir, args.model)
+
+    if args.dataset == "ImageNet":
+        save_dir = os.path.join(save_dir, args.subset)
+    if args.dataset in ["CIFAR10", "CIFAR100", "SVHN"] and not args.zca:
+        save_dir += "_NO_ZCA"
+    save_dir = os.path.join(save_dir, args.model)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
 
+    ''' *Buffer '''
+    criterion = nn.CrossEntropyLoss().to(args.device)
+    trajectories = []
     for it in range(0, args.num_experts):
-
-        ''' Train synthetic data '''
-        teacher_net = get_network(args.model, channel, num_classes, im_size).to(args.device) # get a random model
+        ''' *initialize teacher network'''
+        teacher_net = get_network(args.model, channel, num_classes, im_size).to(args.device)
         teacher_net.train()
         if args.reparam_syn:
             net_eval = get_network(args.model, channel, num_classes, im_size).to(
-                args.device)  # get a random model
+                args.device)
             for image_syn, label_syn, lr in zip(images_best, labels_best, args.lrs_net):
                 eval_labs = label_syn
                 args.lr_net = lr
@@ -122,13 +111,12 @@ def main(args):
         teacher_optim.zero_grad()
 
         timestamps = []
-
         timestamps.append([p.detach().cpu() for p in teacher_net.parameters()])
 
         lr_schedule = [args.train_epochs // 2 + 1]
 
         for e in range(args.train_epochs):
-
+            ''' *update teacher network '''
             train_loss, train_acc = epoch("train", dataloader=trainloader, net=teacher_net, optimizer=teacher_optim,
                                         criterion=criterion, args=args, aug=True)
 
@@ -187,7 +175,6 @@ if __name__ == '__main__':
     parser.add_argument('--lrs_net', type=str, default='0.01', help='the learning rate in the eval model')
     parser.add_argument('--texture', action='store_true', help="will distill textures instead")
 
-    parser.add_argument('--ema', action='store_true')
     args = parser.parse_args()
     main(args)
 
