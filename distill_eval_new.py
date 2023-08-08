@@ -114,8 +114,6 @@ def main(args):
 
     print("Expert Dir: {}".format(expert_dir))
 
-    if not args.reparam_syn:
-        args.run_name = wandb.run.name
 
     if args.load_all:
         buffer = []
