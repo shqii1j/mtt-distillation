@@ -217,9 +217,7 @@ def main(args):
         best_acc = {m: 0 for m in model_eval_pool}
         best_std = {m: 0 for m in model_eval_pool}
 
-        seg_path = "{}-{}".format(start_epoch, end_epoch)
-        if args.pre_names:
-            seg_path = seg_path + '+' + wandb.run.name
+        seg_path = args.name
 
         for it in range(0, args.Iteration+1):
             save_this_it = False
@@ -540,8 +538,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--reparam_syn', action='store_true')
     parser.add_argument('--run_name', type=str, default=None, help="run_name")
-    parser.add_argument('--pre_names', type=str, default=None, help="file_name(epoch)")
-    parser.add_argument('--lrs_net', type=str, default=None, help="lrs_net")
+    parser.add_argument('--pre_names', type=str, default=None, help="The name of previous subsets")
+    parser.add_argument('--name', type=str, default=None, help="The name of this subset")
 
     args = parser.parse_args()
 
