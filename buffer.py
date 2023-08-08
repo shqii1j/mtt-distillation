@@ -62,7 +62,7 @@ def main(args):
         images_best = []
         labels_best = []
         args.lrs_net = [torch.tensor(eval(lr)).to(args.device).item() for lr in args.lrs_net.split(',')]
-        for f in args.files_name.split(','):
+        for f in args.pre_names.split(','):
             if images_best:
                 image_syn = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, 'images_best.pt'))], dim=0)
                 label_syn = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, 'labels_best.pt'))], dim=0)
@@ -83,7 +83,6 @@ def main(args):
     save_dir = os.path.join(save_dir, args.model)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-
 
     ''' *Buffer '''
     criterion = nn.CrossEntropyLoss().to(args.device)
@@ -168,11 +167,10 @@ if __name__ == '__main__':
     parser.add_argument('--reparam_syn', action='store_true')
     parser.add_argument('--epoch_eval_train', type=int, default=1000,
                         help='epochs to train a model with synthetic data')
-    parser.add_argument('--syn_image_path', type=str, default='logged_files', help="syn_image_path")
+    parser.add_argument('--image_path', type=str, default='logged_files', help="syn_image_path")
     parser.add_argument('--run_name', type=str, default=None, help="run_name")
-    parser.add_argument('--files_name', type=str, default=None, help="file_name(epoch)")
+    parser.add_argument('--pre_names', type=str, default=None, help="file_name(epoch)")
     parser.add_argument('--no_aug', type=bool, default=False, help='this turns off diff aug during distillation')
-    parser.add_argument('--lrs_net', type=str, default='0.01', help='the learning rate in the eval model')
     parser.add_argument('--texture', action='store_true', help="will distill textures instead")
 
     args = parser.parse_args()

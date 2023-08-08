@@ -151,7 +151,7 @@ def main(args):
         labels_best = []
         args.lrs_net = [torch.tensor(eval(lr)).to(args.device).item() for lr in args.lrs_net.split(',')]
         image_path = os.path.join(args.image_path, args.dataset, args.run_name)
-        for f in args.files_name.split(','):
+        for f in args.pre_names.split(','):
             if images_best:
                 img = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, 'images_best.pt')).to(args.device).requires_grad_(False)], dim=0)
                 lab = torch.cat([labels_best[-1], torch.load(os.path.join(image_path, f, 'labels_best.pt')).to(args.device)], dim=0)
@@ -217,7 +217,7 @@ def main(args):
         best_std = {m: 0 for m in model_eval_pool}
 
         seg_path = "{}-{}".format(start_epoch, end_epoch)
-        if args.files_name:
+        if args.pre_names:
             seg_path = seg_path + '+' + wandb.run.name
 
         for it in range(0, args.Iteration+1):
@@ -539,7 +539,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--reparam_syn', action='store_true')
     parser.add_argument('--run_name', type=str, default=None, help="run_name")
-    parser.add_argument('--files_name', type=str, default=None, help="file_name(epoch)")
+    parser.add_argument('--pre_names', type=str, default=None, help="file_name(epoch)")
     parser.add_argument('--lrs_net', type=str, default=None, help="lrs_net")
 
     args = parser.parse_args()
