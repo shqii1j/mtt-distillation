@@ -61,7 +61,11 @@ def main(args):
         image_path = os.path.join(args.image_path, args.dataset, args.run_name)
         images_best = []
         labels_best = []
-        args.lrs_net = []
+        if not args.lrs_net:
+            args.lrs_net = []
+        else:
+            args.lrs_net = [torch.tensor(eval(lr)).to(args.device).item() for lr in args.lrs_net.split(',')]
+
         for f in args.pre_names.split(','):
             if images_best:
                 image_syn = torch.cat([images_best[-1], torch.load(os.path.join(image_path, f, 'images_best.pt'))], dim=0)
@@ -73,7 +77,9 @@ def main(args):
                 DiffAugment(image_syn, args.dsa_strategy, param=args.dsa_param)
             images_best.append(image_syn)
             labels_best.append(label_syn)
-            args.lrs_net.append(torch.load(os.path.join(image_path, f, 'best_lr.pt')))
+
+            if not args.lrs_net:
+                args.lrs_net.append(torch.load(os.path.join(image_path, f, 'best_lr.pt')))
 
         save_dir = os.path.join(image_path, f, 'buffer')
 
@@ -170,7 +176,8 @@ if __name__ == '__main__':
                         help='epochs to train a model with synthetic data')
     parser.add_argument('--image_path', type=str, default='logged_files', help="syn_image_path")
     parser.add_argument('--run_name', type=str, default=None, help="run_name")
-    parser.add_argument('--pre_names', type=str, default=None, help="file_name(epoch)")
+    parser.add_argument('--pre_names', type=str, default=None, help="The names of previous subsets")
+    parser.add_argument('--lrs_net', type=str, default=None, help="The lrs of previous subsets")
     parser.add_argument('--no_aug', type=bool, default=False, help='this turns off diff aug during distillation')
     parser.add_argument('--texture', action='store_true', help="will distill textures instead")
 

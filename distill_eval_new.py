@@ -147,7 +147,11 @@ def main(args):
     if args.reparam_syn:
         images_best = []
         labels_best = []
-        args.lrs_net = [torch.tensor(eval(lr)).to(args.device).item() for lr in args.lrs_net.split(',')]
+        if not args.lrs_net:
+            args.lrs_net = []
+        else:
+            args.lrs_net = [torch.tensor(eval(lr)).to(args.device).item() for lr in args.lrs_net.split(',')]
+
         image_path = os.path.join(args.image_path, args.dataset, args.run_name)
         for f in args.pre_names.split(','):
             if images_best:
@@ -158,7 +162,9 @@ def main(args):
                 lab = torch.load(os.path.join(image_path, f, 'labels_best.pt')).to(args.device)
             images_best.append(img)
             labels_best.append(lab)
-            args.lrs_net.append(torch.load(os.path.join(image_path, f, 'best_lr.pt')))
+
+            if not args.lrs_net:
+                args.lrs_net.append(torch.load(os.path.join(image_path, f, 'best_lr.pt')))
 
 
     ''' *Distill '''
@@ -292,8 +298,9 @@ def main(args):
                     if save_this_it:
                         torch.save(image_save.cpu(), os.path.join(save_dir, "images_best.pt"))
                         torch.save(label_syn.cpu(), os.path.join(save_dir, "labels_best.pt"))
-                        best_syn_lr = args.lr_net
 
+                        best_syn_lr = args.lr_net
+                        torch.save(torch.tensor(best_syn_lr), os.path.join(save_dir, "best_lr.pt"))
                         wandb.log({'Best_Syn_Lr/{}'.format(model_eval): best_syn_lr}, commit=commit)
 
                     wandb.log({seg_path+"/Pixels": wandb.Histogram(torch.nan_to_num(image_syn.detach().cpu()))}, commit=commit)     # modi
@@ -536,7 +543,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--reparam_syn', action='store_true')
     parser.add_argument('--run_name', type=str, default=None, help="run_name")
-    parser.add_argument('--pre_names', type=str, default=None, help="The name of previous subsets")
+    parser.add_argument('--pre_names', type=str, default=None, help="The names of previous subsets")
+    parser.add_argument('--lrs_net', type=str, default=None, help="The lrs of previous subsets")
     parser.add_argument('--name', type=str, default=None, help="The name of this subset")
 
     args = parser.parse_args()
