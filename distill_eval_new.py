@@ -160,6 +160,7 @@ def main(args):
                 lab = torch.load(os.path.join(image_path, f, 'labels_best.pt')).to(args.device)
             images_best.append(img)
             labels_best.append(lab)
+            args.lrs_net.append(torch.load(os.path.join(image_path, f, 'best_lr.pt')))
 
 
     ''' *Distill '''
